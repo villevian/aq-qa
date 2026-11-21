@@ -5,7 +5,9 @@
   const ME = document.currentScript;
   const DOC = (ME && ME.dataset.doc) || location.pathname.split('/').pop().replace(/\.html?$/, '') || 'index';
   const ROOT = document.querySelector('main.lr') || document.querySelector('main') || document.body;
-  const DEMO = !CFG.url || !CFG.anon;
+  const ART = CFG.backend === 'artifact';
+  const DEMO = !ART && (!CFG.url || !CFG.anon);
+  let DB = null, COL = null, onRemote = null;
   const LS = k => 'qa_' + k;
   const ls = {
     get(k, d = '') { try { return localStorage.getItem(LS(k)) ?? d } catch (e) { return d } },
@@ -29,7 +31,15 @@
 
   const demoAll = () => { try { return JSON.parse(ls.get('demo_' + DOC, '[]')) } catch (e) { return [] } };
   const demoSave = a => ls.set('demo_' + DOC, JSON.stringify(a));
-  const api = DEMO ? {
+  const now = () => new Date().toISOString();
+  const api = ART ? {
+    login: async () => 'reviewer',
+    list: async () => (await COL.where('doc', '==', DOC).get()).docs.map(d => ({ id: d.id, ...d.data() })),
+    add: async c => { const ref = COL.doc(); const r = { doc: DOC, parent_id: c.parent_id || null, author: c.author, client_id: CLIENT, quote: c.quote || null, prefix: c.prefix || null, suffix: c.suffix || null, section: c.section || null, body: c.body, status: 'open', created_at: now(), updated_at: now() }; await ref.set(r); return { id: ref.id, ...r } },
+    edit: (id, body) => COL.doc(id).update({ body, updated_at: now() }),
+    status: (id, st) => COL.doc(id).update({ status: st, updated_at: now() }),
+    del: async id => { for (const r of ALL.filter(x => x.parent_id === id)) await COL.doc(r.id).delete(); await COL.doc(id).delete() }
+  } : DEMO ? {
     login: async () => 'admin',
     list: async () => demoAll(),
     add: async c => { const a = demoAll(); const r = { ...c, id: uid(), doc: DOC, status: 'open', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; a.push(r); demoSave(a); return r },
@@ -114,7 +124,7 @@
   }
 
   /* ---------- стан ---------- */
-  let ALL = [], POS = {}, FILTER = ls.get('filter', 'open'), WHO = '', busy = false;
+  let dirty = false, ALL = [], POS = {}, FILTER = ls.get('filter', 'open'), WHO = '', busy = false;
   const threads = () => ALL.filter(c => !c.parent_id);
   const replies = id => ALL.filter(c => c.parent_id === id).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const fmt = t => { try { return new Date(t).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch (e) { return '' } };
@@ -186,6 +196,7 @@
   function closePop(keepPending) {
     if (pop) { pop.remove(); pop = null }
     if (!keepPending) unwrapAll('mark.qa-pending');
+    if (dirty) { dirty = false; setTimeout(paint, 0) }
     ROOT.querySelectorAll('mark.qa-active').forEach(m => m.classList.remove('qa-active'));
   }
   function place(el, rect) {
@@ -255,7 +266,7 @@
       if (a === 'rep') return reply();
       if (a === 'st') { const st = c.status === 'resolved' ? 'open' : 'resolved'; try { await api.status(id, st); c.status = st; closePop(); paint(); toast(st === 'resolved' ? 'Позначено як вирішене' : 'Відкрито знову') } catch (er) { toast('Помилка збереження') } return }
       if (a === 'del') {
-        if (!confirm(mid === id ? 'Видалити коментар разом із відповідями?' : 'Видалити відповідь?')) return;
+        if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = mid === id ? 'Видалити все?' : 'Видалити?'; b.style.color = '#b03030'; return }
         try { await api.del(mid); ALL = ALL.filter(x => x.id !== mid && x.parent_id !== mid); closePop(); paint(); if (mid !== id) thread(id) } catch (er) { toast('Помилка видалення') }
         return;
       }
@@ -310,7 +321,7 @@
   $('qa-close').onclick = () => drawer.classList.remove('open');
   $('qa-seg').onclick = e => { const b = e.target.closest('button'); if (!b) return; FILTER = b.dataset.f; ls.set('filter', FILTER); paint() };
   $('qa-who').onchange = e => { WHO = e.target.value; renderList() };
-  $('qa-reload').onclick = () => load().then(() => toast('Оновлено'));
+  $('qa-reload').onclick = () => ART ? (paint(), toast('Оновлюється автоматично')) : load().then(() => toast('Оновлено'));
   $('qa-general').onclick = () => { drawer.classList.remove('open'); composer({ quote: '', prefix: '', suffix: '', section: currentSection() }) };
   $('qa-list').onclick = e => {
     const card = e.target.closest('.qa-card'); if (!card) return;
@@ -325,9 +336,17 @@
       setTimeout(() => thread(id, m), 450);
     } else thread(id);
   };
-  const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000) };
+  const download = (name, text, type) => {
+    if (!ART) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); return }
+    const m = document.createElement('div'); m.className = 'qa-modal qa-ui';
+    m.innerHTML = `<div class="qa-box" style="width:640px"><h2>${esc(name)}</h2><p>Скопіюйте текст і вставте в документ або таблицю.</p><textarea class="qa-ta" style="min-height:300px;font:12px/1.5 ui-monospace,monospace" readonly></textarea><div class="qa-row"><span class="qa-hint sp" id="qa-cpm"></span><button class="qa-btn" data-a="c">Закрити</button><button class="qa-btn pri" data-a="cp">Копіювати</button></div></div>`;
+    const ta = m.querySelector('textarea'); ta.value = text.replace(/^\ufeff/, '');
+    m.onclick = async e => { const a = e.target.closest('[data-a]')?.dataset.a; if (a === 'c' || e.target === m) m.remove(); if (a === 'cp') { try { await navigator.clipboard.writeText(ta.value); m.querySelector('#qa-cpm').textContent = '✓ Скопійовано' } catch (er) { ta.select(); m.querySelector('#qa-cpm').textContent = 'Натисніть Ctrl/⌘+C' } } };
+    document.body.appendChild(m); ta.select();
+  };
   const title = (document.title || DOC).trim();
   const ordered = () => threads().slice().sort((a, b) => (POS[a.id] ?? 1e12) - (POS[b.id] ?? 1e12));
+  if (ART) { $('qa-csv').textContent = '⧉ CSV'; $('qa-md').textContent = '⧉ Markdown' }
   $('qa-csv').onclick = () => {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const rows = [['Розділ', 'Фрагмент', 'Автор', 'Коментар', 'Статус', 'Дата', 'Тип']];
@@ -345,8 +364,8 @@
   };
 
   /* ---------- вхід ---------- */
-  function loginView(msg) {
-    const needKey = !DEMO && !ROLE;
+  function loginView(msg, rename) {
+    const needKey = !DEMO && !ART && !ROLE;
     const m = document.createElement('div'); m.className = 'qa-modal qa-ui';
     m.innerHTML = `<form class="qa-box"><h2>Рецензування матеріалу</h2>
       <p>Виділяйте фрагменти тексту й залишайте коментарі — як у Notion. Коментарі зберігаються автоматично.</p>
@@ -361,10 +380,30 @@
       e.preventDefault();
       const n = m.querySelector('#qa-n').value.trim(); if (!n) return;
       if (needKey) { KEY = m.querySelector('#qa-k').value.trim(); ls.set('key', KEY) }
-      NAME = n; ls.set('name', NAME); m.remove(); start();
+      NAME = n; ls.set('name', NAME); m.remove(); if (rename) setName(); else start();
     };
   }
   async function start() {
+    if (ART && !DB) {
+      $('qa-name').textContent = 'підключення…';
+      const [db, user] = await Promise.all([window.claude?.use?.('db') ?? null, window.claude?.use?.('user') ?? null]);
+      if (!db) { $('qa-name').textContent = 'немає доступу'; const m = document.createElement('div'); m.className = 'qa-modal qa-ui'; m.innerHTML = '<div class="qa-box"><h2>Потрібен вхід у Claude</h2><p>Щоб залишати коментарі, увійдіть у свій акаунт Claude і відкрийте це посилання ще раз. Читати матеріал можна й без входу.</p><div class="qa-row"><button class="qa-btn pri">Читати без коментарів</button></div></div>'; m.querySelector('button').onclick = () => m.remove(); document.body.appendChild(m); return }
+      DB = db; COL = db.collection('comments');
+      try { const id = user && await user.id(); if (id) CLIENT = id; ROLE = (user && await user.isOwner()) ? 'admin' : 'reviewer' } catch (e) { ROLE = 'reviewer' }
+    }
+    if (ART) {
+      if (!NAME) return loginView();
+      setName();
+      if (!start.sub) {
+        const tm = setTimeout(() => toast('База ще не відповідає — спробуйте оновити сторінку'), 10000);
+        start.sub = COL.where('doc', '==', DOC).onSnapshot(snap => {
+          clearTimeout(tm);
+          ALL = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          if (pop) dirty = true; else paint();
+        }, err => { clearTimeout(tm); toast('Зв’язок із базою втрачено. Оновіть сторінку.') });
+      }
+      return;
+    }
     if (!DEMO && !ROLE) {
       if (!KEY) return loginView();
       try { ROLE = await api.login() } catch (e) { const bad = /not allowed/.test(e.message); if (bad) { ls.del('key'); KEY = '' } return loginView(bad ? 'Невірний ключ доступу.' : 'Немає з’єднання з базою.') }
@@ -373,7 +412,7 @@
     setName(); await load();
     if (!start.poll) start.poll = setInterval(() => { if (!pop && !document.hidden) load(true) }, 45000);
   }
-  $('qa-rename').onclick = () => { const n = prompt('Ваше ім’я для коментарів:', NAME); if (n && n.trim()) { NAME = n.trim(); ls.set('name', NAME); setName() } };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && ROLE && NAME && !pop) load(true) });
+  $('qa-rename').onclick = () => { closePop(); loginView('', true) };
+  document.addEventListener('visibilitychange', () => { if (!ART && !document.hidden && ROLE && NAME && !pop) load(true) });
   start();
 })();
