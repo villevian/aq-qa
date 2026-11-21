@@ -16,6 +16,7 @@
 - `t9-web-testing.html` — Тема 9 (те саме, `data-doc="ai-qa-t9"`)
 - `t10-defect-analysis.html` — Тема 10 (те саме, `data-doc="ai-qa-t10"`)
 - `t10-1-final-report.html` — Тема 10.1 (те саме, `data-doc="ai-qa-t10-1"`)
+- `t11-coverage-critic.html` — Тема 11 (те саме, `data-doc="ai-qa-t11"`)
 - `review/review.js`, `review/review.css` — шар рецензування (спільний для всіх тем)
 - `review/config.js` — URL і publishable-ключ Supabase
 - `supabase/schema.sql` — таблиці та RPC-функції (запустити один раз у SQL Editor)
