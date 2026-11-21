@@ -8,6 +8,7 @@
 - `t1-qa-pipeline.html` — Тема 1 (оригінальний лонгрід + 3 рядки підключення шару рецензування перед `</body>`)
 - `t2-jira-task-context.html` — Тема 2 (те саме, `data-doc="ai-qa-t2"`)
 - `t3-requirements-grooming.html` — Тема 3 (те саме, `data-doc="ai-qa-t3"`)
+- `t4-qa-checklist.html` — Тема 4 (те саме, `data-doc="ai-qa-t4"`)
 - `review/review.js`, `review/review.css` — шар рецензування (спільний для всіх тем)
 - `review/config.js` — URL і publishable-ключ Supabase
 - `supabase/schema.sql` — таблиці та RPC-функції (запустити один раз у SQL Editor)
