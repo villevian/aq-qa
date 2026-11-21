@@ -345,19 +345,26 @@
     document.body.appendChild(m); ta.select();
   };
   const title = (document.title || DOC).trim();
+  const paraOf = c => {
+    const m = ROOT.querySelector(`mark.qa-hl[data-qa="${c.id}"]`); if (!m) return '';
+    const b = m.closest('p,li,td,th,h1,h2,h3,h4,dd,dt,blockquote,figcaption,.w,.k') || m.parentElement;
+    const cl = b.cloneNode(true); cl.querySelectorAll('.tip-p,.qa-ui').forEach(x => x.remove());
+    return cl.textContent.replace(/\s+/g, ' ').trim();
+  };
   const ordered = () => threads().slice().sort((a, b) => (POS[a.id] ?? 1e12) - (POS[b.id] ?? 1e12));
   if (ART) { $('qa-csv').textContent = '⧉ CSV'; $('qa-md').textContent = '⧉ Markdown' }
   $('qa-csv').onclick = () => {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const rows = [['Розділ', 'Фрагмент', 'Автор', 'Коментар', 'Статус', 'Дата', 'Тип']];
-    ordered().forEach(c => { rows.push([c.section, c.quote, c.author, c.body, c.status === 'resolved' ? 'вирішено' : 'відкрито', fmt(c.created_at), 'коментар']); replies(c.id).forEach(r => rows.push([c.section, c.quote, r.author, r.body, '', fmt(r.created_at), 'відповідь'])) });
+    const rows = [['Розділ', 'Абзац', 'Виділений фрагмент', 'Автор', 'Коментар', 'Статус', 'Дата', 'Тип']];
+    ordered().forEach(c => { const pa = paraOf(c); rows.push([c.section, pa, c.quote, c.author, c.body, c.status === 'resolved' ? 'вирішено' : 'відкрито', fmt(c.created_at), 'коментар']); replies(c.id).forEach(r => rows.push([c.section, pa, c.quote, r.author, r.body, '', fmt(r.created_at), 'відповідь'])) });
     download(`${DOC}-comments.csv`, '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n'), 'text/csv;charset=utf-8');
   };
   $('qa-md').onclick = () => {
-    let md = `# Коментарі: ${title}\n\n`, sec = null;
+    let md = `# Коментарі експертів: ${title}\n\nДокумент: ${DOC} · експорт ${fmt(new Date().toISOString())}\n\n`, sec = null, n = 0;
     ordered().forEach(c => {
       if (c.section !== sec) { sec = c.section; md += `## ${sec || 'Без розділу'}\n\n` }
-      md += (c.quote ? `> ${c.quote.replace(/\n+/g, ' ')}\n\n` : '') + `- **${c.author}** (${fmt(c.created_at)})${c.status === 'resolved' ? ' ✓ вирішено' : ''}: ${c.body}\n`;
+      const pa = paraOf(c);
+      md += `### Коментар ${++n}\n\n` + (pa ? `**Абзац:**\n\n> ${pa}\n\n` : '') + (c.quote ? `**Виділено:** «${c.quote.replace(/\s+/g, ' ')}»\n\n` : '**Загальний коментар до розділу**\n\n') + `- **${c.author}** (${fmt(c.created_at)})${c.status === 'resolved' ? ' ✓ вирішено' : ''}: ${c.body}\n`;
       replies(c.id).forEach(r => md += `  - ↳ **${r.author}**: ${r.body}\n`); md += '\n';
     });
     download(`${DOC}-comments.md`, md, 'text/markdown;charset=utf-8');
